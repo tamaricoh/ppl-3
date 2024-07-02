@@ -85,12 +85,14 @@ export type CompoundTExp =
   | ProcTExp
   | TupleTExp
   | UnionTExp
+  | typePredTExp // 3.3
   | InterTExp // 3.2
   | DiffTExp; // 3.2
 export const isCompoundTExp = (x: any): x is CompoundTExp =>
   isProcTExp(x) ||
   isTupleTExp(x) ||
   isUnionTExp(x) ||
+  istypePredTExp(x) || // 3.3
   isInterTExp(x) || // 3.2
   isDiffTExp(x); // 3.2
 
@@ -99,6 +101,7 @@ export type NonTupleTExp =
   | ProcTExp
   | TVar
   | UnionTExp
+  | typePredTExp // 3.3
   | InterTExp // 3.2
   | DiffTExp; // 3.2
 export const isNonTupleTExp = (x: any): x is NonTupleTExp =>
@@ -106,6 +109,7 @@ export const isNonTupleTExp = (x: any): x is NonTupleTExp =>
   isProcTExp(x) ||
   isTVar(x) ||
   isUnionTExp(x) ||
+  istypePredTExp(x) || // 3.3
   isInterTExp(x) || // 3.2
   isDiffTExp(x); // 3.2
 
@@ -147,6 +151,24 @@ export const procTExpComponents = (pt: ProcTExp): TExp[] => [
   pt.returnTE,
 ];
 
+export type typePredTExp = {
+  // 3.3
+  tag: "typePredTExp";
+  paramTEs: TExp;
+  returnTE: TExp;
+};
+export const maketypePredTExp = (
+  // 3.3
+  paramTEs: TExp,
+  returnTE: TExp
+): typePredTExp => ({
+  tag: "typePredTExp",
+  paramTEs: paramTEs,
+  returnTE: returnTE,
+});
+export const istypePredTExp = (x: any): x is typePredTExp =>
+  x.tag === "typePredTExp"; // 3.3
+
 export type TupleTExp = NonEmptyTupleTExp | EmptyTupleTExp;
 export const isTupleTExp = (x: any): x is TupleTExp =>
   isNonEmptyTupleTExp(x) || isEmptyTupleTExp(x);
@@ -182,9 +204,17 @@ export const makeInterTExp = (
 export const isInterTExp = (x: any): x is InterTExp => x.tag === "InterTExp"; // 3.2
 
 export type DiffTExp = { tag: "DiffTExp"; components: TExp[] }; //3.2
-export const makeDiffTExp = (
-  tes: TExp[] // 3.2
-): TExp => normalizeDiff({ tag: "DiffTExp", components: flattenSortDiff(tes) }); // 3.2
+export const makeDiffTExp = (tes: TExp[]): TExp => {
+  // 3.2
+  const normalizedComponents = flattenSortDiff(tes);
+  const hasAnyTExp = normalizedComponents.some(isAnyTExp);
+
+  if (hasAnyTExp) {
+    return makeAnyTExp();
+  } else {
+    return { tag: "DiffTExp", components: normalizedComponents }; // 3.2
+  }
+};
 export const isDiffTExp = (x: any): x is DiffTExp => x.tag === "DiffTExp"; // 3.2
 
 // In the value constructor - make sure the invariants are satisfied
@@ -249,15 +279,6 @@ const flattenInter = (
       : [tes[0], ...flattenInter(tes.slice(1))] // 3.2
     : []; // 3.2
 
-// const flattenDiff = (
-//   //----------------------------------
-//   tes: TExp[]
-// ): TExp[] => // 3.2
-//   tes.length > 0 // 3.2
-//     ? isDiffTExp(tes[0]) // 3.2
-//       ? [...tes[0].components, ...flattenDiff(tes.slice(1))] // 3.2
-//       : [tes[0], ...flattenDiff(tes.slice(1))] // 3.2
-//     : []; // 3.2
 const flattenDiff = (tes: TExp[]): TExp[] =>
   tes.length > 0
     ? isDiffTExp(tes[0])
@@ -388,6 +409,8 @@ export const isSubType = (te1: TExp, te2: TExp): boolean =>
     ? containsType(te2.components, te1) // 3.2
     : isProcTExp(te1) && isProcTExp(te2)
     ? checkProcTExps(te1, te2)
+    : istypePredTExp(te1) && istypePredTExp(te2)
+    ? checkTypePredTExp(te1, te2)
     : isTVar(te1)
     ? equals(te1, te2)
     : isAtomicTExp(te1)
@@ -425,6 +448,16 @@ export const checkProcTExps = (te1: ProcTExp, te2: ProcTExp): boolean =>
     (pair: [TExp, TExp]) => isSubType(pair[0], pair[1]),
     zip(te2.paramTEs, te1.paramTEs)
   );
+
+export const checkTypePredTExp = (
+  // 3.3
+  te1: typePredTExp,
+  te2: typePredTExp
+): boolean => {
+  const paramEqual = equals(te1.paramTEs, te2.paramTEs);
+  const returnSubtype = isSubType(te1.returnTE, te2.returnTE);
+  return paramEqual && returnSubtype;
+};
 
 // TVar: Type Variable with support for dereferencing (TVar -> TVar)
 export type TVar = {
@@ -512,7 +545,9 @@ const parseCompoundTExp = (texps: Sexp[]): Result<TExp> =>
     ? parseInterTExp(texps) // 3.2
     : texps[0] == "diff" // 3.2
     ? parseDiffTExp(texps) // 3.2
-    : parseProcTExp(texps);
+    : // : texps[0] == "typePredTExp" // 3.3
+      // ? parseTypePredTExp(texps) // 3.3
+      parseProcTExp(texps);
 
 // Expect (union texp1 ...)
 const parseUnionTExp = (texps: Sexp[]): Result<TExp> =>
@@ -545,6 +580,11 @@ const parseDiffTExp = (
 ;; expected exactly one -> in the list
 ;; We do not accept (a -> b -> c) - must parenthesize
 */
+// const parseTypePredTExp = (
+//   texps: Sexp[]
+// ): Result<typePredTExp> => // 3.3
+//   {};
+
 const parseProcTExp = (texps: Sexp[]): Result<ProcTExp> => {
   const pos = texps.indexOf("->");
   return pos === -1
@@ -671,6 +711,8 @@ export const unparseTExp = (te: TExp): Result<string> => {
             returnTE,
           ])
         )
+      : istypePredTExp(x)
+      ? makeFailure("")
       : isEmptyTupleTExp(x)
       ? makeOk("Empty")
       : isNonEmptyTupleTExp(x)
