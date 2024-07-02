@@ -206,15 +206,16 @@ export const isInterTExp = (x: any): x is InterTExp => x.tag === "InterTExp"; //
 export type DiffTExp = { tag: "DiffTExp"; components: TExp[] }; //3.2
 export const makeDiffTExp = (tes: TExp[]): TExp => {
   // 3.2
-  const normalizedComponents = flattenSortDiff(tes);
-  const hasAnyTExp = normalizedComponents.some(isAnyTExp);
-
-  if (hasAnyTExp) {
-    return makeAnyTExp();
-  } else {
-    return { tag: "DiffTExp", components: normalizedComponents }; // 3.2
+  if (tes.length == 2 && tes[1].tag == "AnyTExp") {
+    return makeNeverTExp();
   }
+  const normalizedComponents = normalizeDiff({
+    tag: "DiffTExp",
+    components: flattenSortDiff(tes),
+  });
+  return normalizedComponents; // 3.2
 };
+
 export const isDiffTExp = (x: any): x is DiffTExp => x.tag === "DiffTExp"; // 3.2
 
 // In the value constructor - make sure the invariants are satisfied
@@ -229,7 +230,7 @@ const flattenSortInter = (tes: TExp[]): TExp[] =>
   removeDuplicatesAndAny(sort(subTypeComparator, flattenInter(tes))); // 3.2
 
 const flattenSortDiff = (tes: TExp[]): TExp[] =>
-  removeDuplicatesAndAny(sort(subTypeComparator, flattenDiff(tes))); // 3.2
+  filterUniqueTExps(sort(subTypeComparator, flattenDiff(tes))); // 3.2
 
 // In case there is only one component - remove the union wrapper.
 // (union) = never
@@ -265,7 +266,7 @@ export const normalizeDiff = (dte: DiffTExp): TExp =>
 // [number, union(number, string)] => [number, string]
 const flattenUnion = (tes: TExp[]): TExp[] =>
   tes.length > 0
-    ? isUnionTExp(tes[0])
+    ? isDiffTExp(tes[0]) || isInterTExp(tes[0]) || isUnionTExp(tes[0])
       ? [...tes[0].components, ...flattenUnion(tes.slice(1))]
       : [tes[0], ...flattenUnion(tes.slice(1))]
     : [];
@@ -274,14 +275,14 @@ const flattenInter = (
   tes: TExp[]
 ): TExp[] => // 3.2
   tes.length > 0 // 3.2
-    ? isInterTExp(tes[0]) // 3.2
+    ? isDiffTExp(tes[0]) || isInterTExp(tes[0]) || isUnionTExp(tes[0]) // 3.2
       ? [...tes[0].components, ...flattenInter(tes.slice(1))] // 3.2
       : [tes[0], ...flattenInter(tes.slice(1))] // 3.2
     : []; // 3.2
 
 const flattenDiff = (tes: TExp[]): TExp[] =>
   tes.length > 0
-    ? isDiffTExp(tes[0])
+    ? isDiffTExp(tes[0]) || isInterTExp(tes[0]) || isUnionTExp(tes[0])
       ? [...tes[0].components, ...flattenDiff(tes.slice(1))]
       : [tes[0], ...flattenDiff(tes.slice(1))]
     : [];
@@ -334,6 +335,26 @@ const removeDuplicatesAndAny = (tes: TExp[]): TExp[] => {
   );
   return uniqueTes; // 3.2
 };
+
+const filterUniqueTExps = (tes: TExp[]): TExp[] => {
+  const hasAnyTExp = tes.some((te) => te.tag === "AnyTExp");
+  if (hasAnyTExp) {
+    return [{ tag: "AnyTExp" }];
+  }
+  // Step 1: Count occurrences of each TExp
+  const countMap = new Map<string, number>();
+  for (const te of tes) {
+    const key = JSON.stringify(te); // Convert object to string for using as a map key
+    countMap.set(key, (countMap.get(key) || 0) + 1);
+  }
+
+  // Step 2: Filter TExp elements appearing only once
+  return tes.filter((te) => {
+    const key = JSON.stringify(te); // Convert object to string for using as a map key
+    return countMap.get(key) === 1;
+  });
+};
+
 // L52 END
 
 // Comparator for sort function - return -1 if te1 > te2, 0 if equal, +1 if te1 < te2
