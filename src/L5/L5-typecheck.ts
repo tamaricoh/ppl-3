@@ -43,7 +43,8 @@ import {
   unparseTExp,
   makeUnionTExp,
   makeInterTExp, // 3.2
-  makeNeverTExp, // 3.2
+  isEmpInter, // 3.2
+  makeDiffTExp,
   BoolTExp,
   NumTExp,
   StrTExp,
@@ -229,7 +230,18 @@ export const makeInter = (
   te1: TExp,
   te2: TExp
 ): TExp => //3.2
-  isSubType(te1, te2) ? te1 : isSubType(te2, te1) ? te2 : makeNeverTExp(); // 3.2
+  isSubType(te1, te2)
+    ? te1
+    : isSubType(te2, te1)
+    ? te2
+    : makeInterTExp([te1, te2]); // 3.2
+
+export const makeDiff = (
+  // 3.2
+  te1: TExp,
+  te2: TExp
+): TExp =>
+  isEmpInter(te1, te2) ? te1 : makeDiffTExp([te1, makeInterTExp([te1, te2])]); //3.2
 
 // Purpose: compute the type of an if-exp that is not a Type predicate
 // Typing rule:
