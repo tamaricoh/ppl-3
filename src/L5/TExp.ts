@@ -199,8 +199,23 @@ export const isUnionTExp = (x: any): x is UnionTExp => x.tag === "UnionTExp";
 export type InterTExp = { tag: "InterTExp"; components: TExp[] }; //3.2
 export const makeInterTExp = (
   tes: TExp[] // 3.2
-): TExp => // 3.2
-  normalizeInter({ tag: "InterTExp", components: flattenSortInter(tes) }); // 3.2
+): TExp => {
+  // 3.2
+  if (
+    tes.length == 2 &&
+    (tes[0].tag == "NeverTExp" || tes[1].tag == "NeverTExp")
+  ) {
+    return makeNeverTExp();
+  }
+  if (tes.length == 2 && tes[0].tag == "AnyTExp" && tes[1].tag == "AnyTExp") {
+    return makeAnyTExp();
+  }
+  return normalizeInter({
+    tag: "InterTExp",
+    components: flattenSortInter(tes),
+  }); // 3.2
+};
+
 export const isInterTExp = (x: any): x is InterTExp => x.tag === "InterTExp"; // 3.2
 
 export type DiffTExp = { tag: "DiffTExp"; components: TExp[] }; //3.2
