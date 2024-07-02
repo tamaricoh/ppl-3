@@ -209,6 +209,12 @@ export const makeDiffTExp = (tes: TExp[]): TExp => {
   if (tes.length == 2 && tes[1].tag == "AnyTExp") {
     return makeNeverTExp();
   }
+  if (
+    tes.length == 2 &&
+    (tes[0].tag == "NeverTExp" || tes[1].tag == "NeverTExp")
+  ) {
+    return tes[0];
+  }
   const normalizedComponents = normalizeDiff({
     tag: "DiffTExp",
     components: flattenSortDiff(tes),
