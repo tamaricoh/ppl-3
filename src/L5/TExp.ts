@@ -219,20 +219,17 @@ export const makeInterTExp = (
 export const isInterTExp = (x: any): x is InterTExp => x.tag === "InterTExp"; // 3.2
 
 export type DiffTExp = { tag: "DiffTExp"; components: TExp[] }; //3.2
-export const makeDiffTExp = (tes: TExp[]): TExp => {
+export const makeDiffTExp = (tes1: TExp, tes2: TExp): TExp => {
   // 3.2
-  if (tes.length == 2 && tes[1].tag == "AnyTExp") {
+  if (tes2.tag == "AnyTExp") {
     return makeNeverTExp();
   }
-  if (
-    tes.length == 2 &&
-    (tes[0].tag == "NeverTExp" || tes[1].tag == "NeverTExp")
-  ) {
-    return tes[0];
+  if (tes1.tag == "NeverTExp" || tes2.tag == "NeverTExp") {
+    return tes1;
   }
   const normalizedComponents = normalizeDiff({
     tag: "DiffTExp",
-    components: flattenSortDiff(tes),
+    components: flattenSortDiff([tes1, tes2]),
   });
   return normalizedComponents; // 3.2
 };
@@ -287,7 +284,7 @@ export const normalizeDiff = (dte: DiffTExp): TExp =>
 // [number, union(number, string)] => [number, string]
 const flattenUnion = (tes: TExp[]): TExp[] =>
   tes.length > 0
-    ? isDiffTExp(tes[0]) || isInterTExp(tes[0]) || isUnionTExp(tes[0])
+    ? isUnionTExp(tes[0])
       ? [...tes[0].components, ...flattenUnion(tes.slice(1))]
       : [tes[0], ...flattenUnion(tes.slice(1))]
     : [];
@@ -296,7 +293,7 @@ const flattenInter = (
   tes: TExp[]
 ): TExp[] => // 3.2
   tes.length > 0 // 3.2
-    ? isDiffTExp(tes[0]) || isInterTExp(tes[0]) || isUnionTExp(tes[0]) // 3.2
+    ? isInterTExp(tes[0]) // 3.2
       ? [...tes[0].components, ...flattenInter(tes.slice(1))] // 3.2
       : [tes[0], ...flattenInter(tes.slice(1))] // 3.2
     : []; // 3.2
@@ -607,15 +604,14 @@ const parseInterTExp = (
     ) => makeInterTExp(tes) // 3.2
   );
 
-const parseDiffTExp = (
-  texps: Sexp[]
-): Result<TExp> => // 3.2
-  mapv(
-    mapResult(parseTExp, texps.slice(1)),
-    (
-      tes: TExp[] // 3.2
-    ) => makeDiffTExp(tes) // 3.2
+const parseDiffTExp = (texps: Sexp[]): Result<TExp> => {
+  if (texps.length !== 3) {
+    return makeFailure("DiffTExp requires exactly 2 arguments");
+  }
+  return bind(parseTExp(texps[1]), (tes1: TExp) =>
+    bind(parseTExp(texps[2]), (tes2: TExp) => makeOk(makeDiffTExp(tes1, tes2)))
   );
+};
 
 /*
 ;; expected structure: (<params> -> <returnte>)
