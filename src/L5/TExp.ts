@@ -221,15 +221,17 @@ export const isInterTExp = (x: any): x is InterTExp => x.tag === "InterTExp"; //
 export type DiffTExp = { tag: "DiffTExp"; components: TExp[] }; //3.2
 export const makeDiffTExp = (tes1: TExp, tes2: TExp): TExp => {
   // 3.2
+  const te2 = makeInterTExp([tes1, tes2]);
+  if (!isSubType(tes1, tes2) && !isSubType(tes2, tes1)) return tes1;
   if (tes2.tag == "AnyTExp") {
     return makeNeverTExp();
   }
-  if (tes1.tag == "NeverTExp" || tes2.tag == "NeverTExp") {
+  if (tes1.tag == "NeverTExp" || te2.tag == "NeverTExp") {
     return tes1;
   }
   const normalizedComponents = normalizeDiff({
     tag: "DiffTExp",
-    components: flattenSortDiff([tes1, tes2]),
+    components: flattenSortDiff([tes1, te2]),
   });
   return normalizedComponents; // 3.2
 };
@@ -450,14 +452,13 @@ export const isSubType = (te1: TExp, te2: TExp): boolean =>
     ? checkProcTExps(te1, te2)
     : istypePredTExp(te1) && istypePredTExp(te2)
     ? checkTypePredTExp(te1, te2)
+    : isTExp(te1) && isTExp(te2)
+    ? te2.tag == "AnyTExp" || te1.tag == te2.tag
     : isTVar(te1)
     ? equals(te1, te2)
     : isAtomicTExp(te1)
     ? equals(te1, te2)
     : false;
-
-export const isEmpInter = (te1: TExp, te2: TExp): boolean =>
-  makeInterTExp([te1, te2]).tag == "NeverTExp";
 
 // True when te is in tes or is a subtype of one of the elements of tes
 export const containsType = (tes: TExp[], te: TExp): boolean =>

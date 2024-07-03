@@ -240,8 +240,7 @@ export const makeDiff = (
   // 3.2
   te1: TExp,
   te2: TExp
-): TExp =>
-  isEmpInter(te1, te2) ? te1 : makeDiffTExp([te1, makeInterTExp([te1, te2])]); //3.2
+): TExp => makeDiffTExp(te1, te2); //3.2
 
 // Purpose: compute the type of an if-exp that is not a Type predicate
 // Typing rule:
@@ -267,22 +266,26 @@ export const typeofIfNormal = (ifExp: IfExp, tenv: TEnv): Result<TExp> => {
 const isTypePredApp = (
   e: Exp,
   tenv: TEnv
-): Result<{
-  /* Add parameters */
-}> => {};
+): Result<{ argExp: any; argTExp: any; pred: any }> => {};
 
 export const typeofIf = (ifExp: IfExp, tenv: TEnv): Result<TExp> =>
   either(
-    bind(
-      isTypePredApp(ifExp.test, tenv),
-      (
-        {
-          /* Add parameter here */
-        }
-      ) => {}
-    ),
-    makeOk,
-    () => typeofIfNormal(ifExp, tenv)
+    bind(isTypePredApp(ifExp.test, tenv), ({ argExp, argTExp, pred }) => {
+      const thenTE = typeofExp(
+        ifExp.then,
+        makeExtendTEnv([argExp.var], [argTExp], tenv)
+      );
+      const elseTE = typeofExp(ifExp.alt, tenv);
+
+      // Check compatibility of the refined types
+      return bind(thenTE, (thenType: TExp) =>
+        bind(elseTE, (elseType: TExp) =>
+          checkCompatibleType(thenType, elseType, ifExp)
+        )
+      );
+    }),
+    () => makeFailure("Type predicate check failed"), // Handle failure case with makeFailure
+    () => typeofIfNormal(ifExp, tenv) // Call typeofIfNormal if isTypePredApp fails
   );
 
 // Purpose: compute the type of a proc-exp
