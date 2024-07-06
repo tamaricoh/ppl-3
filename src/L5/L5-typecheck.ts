@@ -298,9 +298,7 @@ export const typeofIf = (ifExp: IfExp, tenv: TEnv): Result<TExp> =>
           if (checkCompatibleType(thenTE, altTE, ifExp)) {
             return makeOk(thenTE); // Return the type of `then` branch
           } else {
-            return makeFailure(
-              `Type mismatch in then/alt branches of if-expression`
-            );
+            return makeOk(makeDiff(altTE, thenTE));
           }
         })
       );
