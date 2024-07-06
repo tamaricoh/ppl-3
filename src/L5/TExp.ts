@@ -62,7 +62,7 @@ import {
 import { parse as p } from "../shared/parser";
 import { format } from "../shared/format";
 
-export type TExp = AtomicTExp | CompoundTExp | TVar;
+export type TExp = AtomicTExp | CompoundTExp | TVar | typePredTExp;
 export const isTExp = (x: any): x is TExp =>
   isAtomicTExp(x) || isCompoundTExp(x) || isTVar(x);
 
@@ -139,7 +139,10 @@ export const isNeverTExp = (x: any): x is NeverTExp => x.tag === "NeverTExp"; //
 
 // proc-te(param-tes: list(te), return-te: te)
 export type ProcTExp = { tag: "ProcTExp"; paramTEs: TExp[]; returnTE: TExp };
-export const makeProcTExp = (paramTEs: TExp[], returnTE: TExp): ProcTExp => ({
+export const makeProcTExp = (
+  paramTEs: TExp[],
+  returnTE: TExp | typePredTExp // 3.3
+): ProcTExp => ({
   tag: "ProcTExp",
   paramTEs: paramTEs,
   returnTE: returnTE,
@@ -154,17 +157,19 @@ export const procTExpComponents = (pt: ProcTExp): TExp[] => [
 export type typePredTExp = {
   // 3.3
   tag: "typePredTExp";
-  paramTEs: TExp;
-  returnTE: TExp;
+  arg: TExp;
+  pred: TExp;
+  ret: TExp;
 };
-export const maketypePredTExp = (
-  // 3.3
-  paramTEs: TExp,
-  returnTE: TExp
+export const makeTypePredTExp = (
+  arg: TExp,
+  pred: TExp,
+  ret: TExp
 ): typePredTExp => ({
   tag: "typePredTExp",
-  paramTEs: paramTEs,
-  returnTE: returnTE,
+  arg,
+  pred,
+  ret,
 });
 export const istypePredTExp = (x: any): x is typePredTExp =>
   x.tag === "typePredTExp"; // 3.3
@@ -207,9 +212,13 @@ export const makeInterTExp = (
   ) {
     return makeNeverTExp();
   }
+  if (tes.length == 2 && tes[0].tag == "AnyTExp") {
+    return tes[1];
+  }
   if (tes.length == 2 && tes[0].tag == "AnyTExp" && tes[1].tag == "AnyTExp") {
     return makeAnyTExp();
   }
+
   return normalizeInter({
     tag: "InterTExp",
     components: flattenSortInter(tes),
@@ -489,15 +498,10 @@ export const checkProcTExps = (te1: ProcTExp, te2: ProcTExp): boolean =>
     zip(te2.paramTEs, te1.paramTEs)
   );
 
-export const checkTypePredTExp = (
-  // 3.3
-  te1: typePredTExp,
-  te2: typePredTExp
-): boolean => {
-  const paramEqual = equals(te1.paramTEs, te2.paramTEs);
-  const returnSubtype = isSubType(te1.returnTE, te2.returnTE);
-  return paramEqual && returnSubtype;
-};
+const checkTypePredTExp = (te1: typePredTExp, te2: typePredTExp): boolean =>
+  isSubType(te1.arg, te2.arg) &&
+  isSubType(te1.pred, te2.pred) &&
+  isSubType(te1.ret, te2.ret);
 
 // TVar: Type Variable with support for dereferencing (TVar -> TVar)
 export type TVar = {
@@ -572,6 +576,14 @@ export const parseTExp = (texp: Sexp): Result<TExp> =>
     ? makeOk(makeAnyTExp()) // 3.1
     : texp == "never" // 3.1
     ? makeOk(makeNeverTExp()) // 3.1
+    : texp[0] === "is" && texp.length === 4
+    ? bind(parseTExp(texp[1]), (arg: TExp) =>
+        bind(parseTExp(texp[2]), (pred: TExp) =>
+          bind(parseTExp(texp[3]), (ret: TExp) =>
+            makeOk(makeTypePredTExp(arg, pred, ret))
+          )
+        )
+      )
     : isString(texp)
     ? makeOk(makeTVar(texp))
     : isArray(texp)

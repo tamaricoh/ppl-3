@@ -43,7 +43,6 @@ import {
   unparseTExp,
   makeUnionTExp,
   makeInterTExp, // 3.2
-  isEmpInter, // 3.2
   makeDiffTExp,
   BoolTExp,
   NumTExp,
@@ -51,6 +50,8 @@ import {
   TExp,
   VoidTExp,
   isSubType,
+  istypePredTExp,
+  makeTypePredTExp,
 } from "./TExp";
 import {
   isEmpty,
@@ -90,14 +91,15 @@ export const checkCompatibleType = (
 ): Result<true> =>
   isSubType(te1, te2)
     ? makeOk(true)
-    : bind(unparseTExp(te1), (te1: string) =>
-        bind(unparseTExp(te2), (te2: string) =>
-          bind(unparse(exp), (exp: string) =>
-            makeFailure<true>(`Incompatible types: ${te1} and ${te2} in ${exp}`)
+    : bind(unparseTExp(te1), (te1Str: string) =>
+        bind(unparseTExp(te2), (te2Str: string) =>
+          bind(unparse(exp), (expStr: string) =>
+            makeFailure<true>(
+              `Incompatible types: ${te1Str} and ${te2Str} in ${expStr}`
+            )
           )
         )
       );
-
 // Compute the type of L5 AST exps to TE
 // ===============================================
 // Compute a Typed-L5 AST exp to a Texp on the basis
@@ -263,29 +265,49 @@ export const typeofIfNormal = (ifExp: IfExp, tenv: TEnv): Result<TExp> => {
 };
 
 // L52 Structured methods
-const isTypePredApp = (
+export const isTypePredApp = (
   e: Exp,
   tenv: TEnv
-): Result<{ argExp: any; argTExp: any; pred: any }> => {};
+): Result<{ rator: TExp; arg: TExp }> => {
+  if (isAppExp(e)) {
+    const appExp = e as AppExp;
+    return bind(typeofExp(appExp.rator, tenv), (ratorTE: TExp) => {
+      if (istypePredTExp(ratorTE)) {
+        return bind(typeofExp(appExp.rands[0], tenv), (argTE: TExp) => {
+          if (argTE.tag === ratorTE.arg.tag) {
+            return makeOk({ rator: ratorTE, arg: argTE });
+          } else {
+            return makeFailure(`Type mismatch in type predicate application`);
+          }
+        });
+      } else {
+        return makeFailure(`Non-type predicate application`);
+      }
+    });
+  } else {
+    return makeFailure(`Not an application expression`);
+  }
+};
 
 export const typeofIf = (ifExp: IfExp, tenv: TEnv): Result<TExp> =>
   either(
-    bind(isTypePredApp(ifExp.test, tenv), ({ argExp, argTExp, pred }) => {
-      const thenTE = typeofExp(
-        ifExp.then,
-        makeExtendTEnv([argExp.var], [argTExp], tenv)
-      );
-      const elseTE = typeofExp(ifExp.alt, tenv);
-
-      // Check compatibility of the refined types
-      return bind(thenTE, (thenType: TExp) =>
-        bind(elseTE, (elseType: TExp) =>
-          checkCompatibleType(thenType, elseType, ifExp)
-        )
+    bind(isTypePredApp(ifExp.test, tenv), ({ rator, arg }) => {
+      // Here, handle the case where the test is a type predicate application
+      return bind(typeofExp(ifExp.then, tenv), (thenTE: TExp) =>
+        bind(typeofExp(ifExp.alt, tenv), (altTE: TExp): Result<TExp> => {
+          if (checkCompatibleType(thenTE, altTE, ifExp)) {
+            return makeOk(thenTE); // Return the type of `then` branch
+          } else {
+            return makeFailure(
+              `Type mismatch in then/alt branches of if-expression`
+            );
+          }
+        })
       );
     }),
-    () => makeFailure("Type predicate check failed"), // Handle failure case with makeFailure
-    () => typeofIfNormal(ifExp, tenv) // Call typeofIfNormal if isTypePredApp fails
+    makeOk,
+    () => typeofIfNormal(ifExp, tenv) // Fallback to normal if-exp type checking
+    // Return ok for the result
   );
 
 // Purpose: compute the type of a proc-exp
@@ -302,7 +324,18 @@ export const typeofProc = (proc: ProcExp, tenv: TEnv): Result<TExp> => {
   const constraint1 = bind(typeofExps(proc.body, extTEnv), (body: TExp) =>
     checkCompatibleType(body, proc.returnTE, proc)
   );
-  return bind(constraint1, (_) => makeOk(makeProcTExp(argsTEs, proc.returnTE)));
+  return bind(constraint1, (_) => {
+    if (istypePredTExp(proc.returnTE)) {
+      return makeOk(
+        makeProcTExp(
+          argsTEs,
+          makeTypePredTExp(argsTEs[0], argsTEs[3], proc.returnTE)
+        )
+      );
+    } else {
+      return makeOk(makeProcTExp(argsTEs, proc.returnTE));
+    }
+  });
 };
 
 // Purpose: compute the type of an app-exp
@@ -315,27 +348,43 @@ export const typeofProc = (proc: ProcExp, tenv: TEnv): Result<TExp> => {
 // We also check the correct number of arguments is passed.
 export const typeofApp = (app: AppExp, tenv: TEnv): Result<TExp> =>
   bind(typeofExp(app.rator, tenv), (ratorTE: TExp) => {
-    if (!isProcTExp(ratorTE)) {
+    if (istypePredTExp(ratorTE)) {
+      if (app.rands.length !== 1) {
+        return makeFailure(
+          `Type predicate application must have exactly one argument`
+        );
+      }
+      return bind(typeofExp(app.rands[0], tenv), (randType: TExp) => {
+        if (randType.tag === ratorTE.arg.tag) {
+          return makeOk(ratorTE.ret);
+        } else {
+          return makeFailure(
+            `Type mismatch: expected ${ratorTE.arg}, got ${randType}`
+          );
+        }
+      });
+    } else if (!isProcTExp(ratorTE)) {
       return bind(unparseTExp(ratorTE), (rator: string) =>
         bind(unparse(app), (exp: string) =>
           makeFailure<TExp>(`Application of non-procedure: ${rator} in ${exp}`)
         )
       );
-    }
-    if (app.rands.length !== ratorTE.paramTEs.length) {
-      return bind(unparse(app), (exp: string) =>
-        makeFailure<TExp>(`Wrong parameter numbers passed to proc: ${exp}`)
+    } else {
+      if (app.rands.length !== ratorTE.paramTEs.length) {
+        return bind(unparse(app), (exp: string) =>
+          makeFailure<TExp>(`Wrong parameter numbers passed to proc: ${exp}`)
+        );
+      }
+      const constraints = zipWithResult(
+        (rand, trand) =>
+          bind(typeofExp(rand, tenv), (typeOfRand: TExp) =>
+            checkCompatibleType(typeOfRand, trand, app)
+          ),
+        app.rands,
+        ratorTE.paramTEs
       );
+      return bind(constraints, (_) => makeOk(ratorTE.returnTE));
     }
-    const constraints = zipWithResult(
-      (rand, trand) =>
-        bind(typeofExp(rand, tenv), (typeOfRand: TExp) =>
-          checkCompatibleType(typeOfRand, trand, app)
-        ),
-      app.rands,
-      ratorTE.paramTEs
-    );
-    return bind(constraints, (_) => makeOk(ratorTE.returnTE));
   });
 
 // Purpose: compute the type of a let-exp
